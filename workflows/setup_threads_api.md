@@ -62,7 +62,8 @@ curl -s "https://graph.threads.net/v1.0/me/mentions?fields=id,text,username&acce
 ```
 
 ## Notes / gotchas
-- **Images must be at a public URL** to publish — the bot uses Imgur (see `setup_imgur.md`).
+- **Images must be at a public URL** to publish — the bot uploads to a host (default
+  catbox.moe, no account; see `setup_image_host.md`).
 - Image containers may need a few seconds of processing before publish; `threads_post.py`
   polls container `status` until `FINISHED`.
 - Post text limit is **500 characters**; the bot clamps the forecast to fit.

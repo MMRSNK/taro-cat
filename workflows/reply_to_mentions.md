@@ -15,7 +15,7 @@ forecast image + text answering that question.
    - `draw_cards.draw(3)` → 3 cards.
    - `generate_forecast.generate(question=...)` → forecast tied to the question.
    - `compose_image.compose(...)` → image.
-   - `upload_imgur.upload(...)` → public URL.
+   - `upload_image.upload(...)` → public URL (catbox by default).
    - `threads_post.post(text, image_url, reply_to_id=mention_id)` → reply.
    - `state.mark_seen(mention_id)` → never answer the same mention twice.
 

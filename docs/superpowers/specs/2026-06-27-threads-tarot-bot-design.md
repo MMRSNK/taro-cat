@@ -23,7 +23,7 @@ Runs in Docker. Built on the WAT framework (Workflows / Agents / Tools).
 | Topic | Decision |
 |-------|----------|
 | Threads posting | Official Threads Graph API. Setup documented in a workflow first. |
-| Image hosting | Imgur API (image must be at a public URL for Threads to accept it). |
+| Image hosting | Pluggable host, default catbox.moe (no account/key). Image must be at a public URL for Threads to accept it. Imgur dropped (registration blocked). |
 | Forecast text | OpenAI (user supplies API key). |
 | Prompt | Lives in editable `prompts/forecast_prompt.yaml` (system + user_template + model params). |
 | Reply detection | Polling the Threads mentions API every N minutes, dedupe by id (state file). |
@@ -48,28 +48,28 @@ Runs in Docker. Built on the WAT framework (Workflows / Agents / Tools).
 - `draw_cards.py` — draw 3 unique random cards, each random orientation.
 - `generate_forecast.py` — render prompt, call OpenAI, return forecast text.
 - `compose_image.py` — Pillow: load scans, rotate reversed, lay 3 side-by-side + title → PNG.
-- `upload_imgur.py` — upload PNG to Imgur → public url.
+- `upload_image.py` — upload PNG to a public host (catbox/tmpfiles/imgur via `IMAGE_HOST`) → public url.
 - `threads_post.py` — create image media container + publish; supports reply (`reply_to_id`).
 - `threads_mentions.py` — poll mentions, return unprocessed ones.
 - `run_bot.py` — orchestrator + APScheduler + CLI (`--post-now`, `--reply-once`, `--dry-run`).
 
 ### Workflows (`workflows/`, markdown SOPs)
-- `setup_threads_api.md`, `setup_imgur.md`, `post_daily_forecast.md`, `reply_to_mentions.md`, `add_card_scans.md`.
+- `setup_threads_api.md`, `setup_image_host.md`, `post_daily_forecast.md`, `reply_to_mentions.md`, `add_card_scans.md`.
 
 ### Config (`.env`)
-`OPENAI_API_KEY`, `OPENAI_MODEL`, `THREADS_USER_ID`, `THREADS_ACCESS_TOKEN`, `IMGUR_CLIENT_ID`,
+`OPENAI_API_KEY`, `OPENAI_MODEL`, `THREADS_USER_ID`, `THREADS_ACCESS_TOKEN`, `IMAGE_HOST` (default catbox), `IMGUR_CLIENT_ID` (only if host=imgur),
 `POST_CRON` (default `0 9 * * *`), `MENTION_POLL_MINUTES` (default 5), `REVERSED_PROB` (default 0.5),
 `FORECAST_LANG` (default `uk`), `TZ`.
 
 ## Flows
 
-**Daily post**: scheduler → draw 3 (general theme) → forecast → compose image → Imgur upload → Threads publish.
+**Daily post**: scheduler → draw 3 (general theme) → forecast → compose image → host upload → Threads publish.
 
 **Reply**: poll mentions → for each new mention with a question → draw 3 → forecast (tied to question) →
-compose image → Imgur upload → Threads reply → mark id processed.
+compose image → host upload → Threads reply → mark id processed.
 
 ## Out of scope (YAGNI)
 - Webhooks (polling is enough).
 - Spreads other than 3-card.
 - Multi-language (Ukrainian only).
-- Web dashboard / DB (flat files + Imgur/Threads are the deliverables).
+- Web dashboard / DB (flat files + image host/Threads are the deliverables).

@@ -46,8 +46,9 @@ class Settings:
     THREADS_ACCESS_TOKEN = _get("THREADS_ACCESS_TOKEN")
     THREADS_API_BASE = _get("THREADS_API_BASE", "https://graph.threads.net/v1.0")
 
-    # Imgur
-    IMGUR_CLIENT_ID = _get("IMGUR_CLIENT_ID")
+    # Image hosting (catbox | tmpfiles | imgur)
+    IMAGE_HOST = _get("IMAGE_HOST", "catbox")
+    IMGUR_CLIENT_ID = _get("IMGUR_CLIENT_ID")  # only if IMAGE_HOST=imgur
 
     # Behavior
     POST_CRON = _get("POST_CRON", "0 9 * * *")

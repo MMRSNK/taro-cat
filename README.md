@@ -15,7 +15,7 @@ Built on the **WAT framework** (Workflows / Agents / Tools):
 draw 3 cards (random orientation)
    └─ OpenAI writes the forecast (prompt = prompts/forecast_prompt.yaml)
         └─ Pillow composes 3 scans into one image (reversed = rotated 180°)
-             └─ Imgur hosts the image (public URL)
+             └─ catbox.moe hosts the image (public URL)
                   └─ Threads API publishes / replies
 ```
 Two triggers: a **cron** (daily general post) and **mention polling** (replies).
@@ -25,7 +25,7 @@ Two triggers: a **cron** (daily general post) and **mention polling** (replies).
 2. `cp .env.example .env` and fill it in:
    - OpenAI key → already have one.
    - Threads creds → `workflows/setup_threads_api.md`
-   - Imgur client id → `workflows/setup_imgur.md`
+   - Image host → `workflows/setup_image_host.md` (default catbox.moe needs nothing)
 3. Generate placeholder cards (optional; auto for tests):
    `python tools/make_placeholder_cards.py`
 4. (Later) add real scans → `workflows/add_card_scans.md`

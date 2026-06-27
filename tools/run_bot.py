@@ -53,7 +53,7 @@ def publish(text, image_path, reply_to_id=None, offline=False, dry_run=False):
                  image_path, reply_to_id, text)
         return None
 
-    from upload_imgur import upload
+    from upload_image import upload
     from threads_post import post
 
     image_url = upload(image_path)
