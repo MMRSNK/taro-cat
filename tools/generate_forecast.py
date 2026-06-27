@@ -40,7 +40,12 @@ def generate(cards, question="", theme=None):
             {"role": "user", "content": user},
         ],
     )
-    return resp.choices[0].message.content.strip()
+    text = resp.choices[0].message.content.strip()
+
+    from logsink import log_block
+    log_block("FORECAST", model=model, theme=theme,
+              question=(question or "(none)"), prompt=user, response=text)
+    return text
 
 
 if __name__ == "__main__":

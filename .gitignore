@@ -7,6 +7,7 @@ credentials.json
 .tmp/
 .tmp_rules.txt
 data/state.json
+data/prompts.log
 
 # Card scans are user-supplied; keep placeholders out of git by default.
 # Comment the next line if you want real scans tracked in the repo.

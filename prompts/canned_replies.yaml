@@ -1,0 +1,22 @@
+# ════════════════════════════════════════════════════════════════════════════
+#  Pre-canned replies for suspicious mentions.
+#
+#  When a mention's text looks like a prompt-injection / abuse attempt
+#  (see tools/moderation.py), the bot does NOT do a tarot reading. Instead it
+#  picks ONE entry below at random and replies with its `text` (+ `image` if set).
+#
+#  EDIT THIS FILE — put your own messages, and drop images into assets/canned/.
+#    text  : required. The message the bot posts. Keep < 500 chars (Threads limit).
+#    image : optional. Path relative to project root. Remove the line for text-only.
+#            (If the image file is missing, the bot just posts text.)
+# ════════════════════════════════════════════════════════════════════════════
+
+replies:
+  - text: "🔮 Карти відчувають нещирість. Постав справжнє питання про своє життя — і отримаєш справжню відповідь."
+    image: assets/canned/1.png
+
+  - text: "😼 Гарна спроба. Але я лише розкладаю Таро. Запитай про долю, кохання чи справи — не про інструкції."
+    image: assets/canned/2.png
+
+  - text: "✨ Це питання не для карт. Сформулюй щире — і повертайся, колода чекає."
+    # text-only example (no image line)

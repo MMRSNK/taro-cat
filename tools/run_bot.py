@@ -56,8 +56,9 @@ def publish(text, image_path, reply_to_id=None, offline=False, dry_run=False):
     from upload_image import upload
     from threads_post import post
 
-    image_url = upload(image_path)
-    log.info("uploaded image -> %s", image_url)
+    image_url = upload(image_path) if image_path else None
+    if image_url:
+        log.info("uploaded image -> %s", image_url)
     media_id = post(text, image_url=image_url, reply_to_id=reply_to_id)
     log.info("published to Threads -> media id %s", media_id)
     return media_id
@@ -86,11 +87,30 @@ def do_replies(offline=False, dry_run=False):
         log.info("no new mentions")
         return
 
+    from moderation import is_injection, pick_canned
+    from logsink import log_block
+
     log.info("processing %d new mention(s)", len(mentions))
     for m in mentions:
         mid = m["id"]
-        question = m.get("question") or "Загальний розклад на сьогодні"
-        log.info("mention %s from @%s: %s", mid, m.get("username"), question)
+        raw_q = m.get("question") or ""
+        log.info("mention %s from @%s: %s", mid, m.get("username"), raw_q)
+
+        # Suspicious / prompt-injection attempt -> canned reply, no tarot reading.
+        if is_injection(raw_q):
+            ctext, cimg = pick_canned()
+            log.info("injection detected in %s -> canned reply", mid)
+            log_block("INJECTION_REPLY", mention=mid, user=m.get("username"),
+                      question=raw_q, reply=ctext, image=str(cimg))
+            try:
+                publish(ctext, cimg, reply_to_id=mid, offline=offline, dry_run=dry_run)
+                if not (offline or dry_run):
+                    mark_seen(mid)
+            except Exception:
+                log.exception("failed canned reply for %s", mid)
+            continue
+
+        question = raw_q or "Загальний розклад на сьогодні"
         try:
             cards, text, img = build_forecast(
                 question=question, theme="питання користувача", offline=offline)
