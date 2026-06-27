@@ -1,0 +1,25 @@
+# Secrets — NEVER commit
+.env
+token.json
+credentials.json
+
+# Scratch / generated
+.tmp/
+.tmp_rules.txt
+data/state.json
+
+# Card scans are user-supplied; keep placeholders out of git by default.
+# Comment the next line if you want real scans tracked in the repo.
+cards/*.png
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+*.egg-info/
+
+# OS
+.DS_Store
+Thumbs.db

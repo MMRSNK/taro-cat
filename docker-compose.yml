@@ -1,0 +1,15 @@
+services:
+  bot:
+    build: .
+    container_name: taro-bot
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      - TZ=${TZ:-Europe/Kyiv}
+    volumes:
+      # Drop real card scans here without rebuilding the image.
+      - ./cards:/app/cards
+      # Persist state (processed mention ids) across restarts.
+      - ./data:/app/data
+      # Scratch space for composed images.
+      - ./.tmp:/app/.tmp
