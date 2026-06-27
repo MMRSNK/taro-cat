@@ -13,7 +13,9 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont
 
-from config import CARDS_DIR, TMP_DIR
+from config import CARDS_DIR, TMP_DIR, ROOT
+
+BG_IMAGE = ROOT / "assets" / "post_bg.png"
 
 # Layout constants
 BG = (24, 18, 38)          # deep purple
@@ -90,12 +92,27 @@ def _draw_wrapped(draw, text, font, max_w, start_y, fill, center_x):
     return y
 
 
+def _cover(img, w, h):
+    """Scale to cover (w,h) then center-crop."""
+    iw, ih = img.size
+    scale = max(w / iw, h / ih)
+    img = img.resize((int(iw * scale) + 1, int(ih * scale) + 1))
+    x = (img.width - w) // 2
+    y = (img.height - h) // 2
+    return img.crop((x, y, x + w, y + h))
+
+
 def compose(cards, title="Таро прогноз", subtitle="", out_dir=TMP_DIR):
     n = len(cards)
     width = MARGIN * 2 + n * CARD_W + (n - 1) * GAP
     height = MARGIN + TITLE_H + CARD_H + CAPTION_H + MARGIN
 
-    canvas = Image.new("RGB", (width, height), BG)
+    if BG_IMAGE.exists():
+        canvas = _cover(Image.open(BG_IMAGE).convert("RGB"), width, height)
+        veil = Image.new("RGBA", (width, height), (10, 8, 20, 60))
+        canvas = Image.alpha_composite(canvas.convert("RGBA"), veil).convert("RGB")
+    else:
+        canvas = Image.new("RGB", (width, height), BG)
     draw = ImageDraw.Draw(canvas)
 
     # Title + optional subtitle
