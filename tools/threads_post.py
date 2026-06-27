@@ -36,6 +36,31 @@ def _base():
     return f"{settings.THREADS_API_BASE}/{settings.THREADS_USER_ID}"
 
 
+def _is_transient(resp):
+    """Threads sometimes returns transient 500s — flagged is_transient / code 2."""
+    if resp.status_code >= 500:
+        return True
+    try:
+        err = resp.json().get("error", {})
+        return bool(err.get("is_transient")) or err.get("code") == 2
+    except ValueError:
+        return False
+
+
+def _post_retry(url, data, what, attempts=4, base_delay=4):
+    """POST with retry/backoff on transient Threads errors."""
+    last = None
+    for i in range(attempts):
+        r = requests.post(url, data=data, timeout=60)
+        if r.status_code == 200:
+            return r
+        last = r
+        if not _is_transient(r) or i == attempts - 1:
+            break
+        time.sleep(base_delay * (i + 1))  # 4s, 8s, 12s
+    raise RuntimeError(f"{what} failed [{last.status_code}]: {last.text}")
+
+
 def create_container(text, image_url=None, reply_to_id=None):
     require("THREADS_USER_ID", "THREADS_ACCESS_TOKEN")
     params = {
@@ -50,9 +75,7 @@ def create_container(text, image_url=None, reply_to_id=None):
     if reply_to_id:
         params["reply_to_id"] = reply_to_id
 
-    r = requests.post(f"{_base()}/threads", data=params, timeout=60)
-    if r.status_code != 200:
-        raise RuntimeError(f"create container failed [{r.status_code}]: {r.text}")
+    r = _post_retry(f"{_base()}/threads", params, "create container")
     return r.json()["id"]
 
 
@@ -75,14 +98,11 @@ def wait_ready(container_id, attempts=10, delay=3):
 
 
 def publish(container_id):
-    r = requests.post(
+    r = _post_retry(
         f"{_base()}/threads_publish",
-        data={"creation_id": container_id,
-              "access_token": settings.THREADS_ACCESS_TOKEN},
-        timeout=60,
+        {"creation_id": container_id, "access_token": settings.THREADS_ACCESS_TOKEN},
+        "publish",
     )
-    if r.status_code != 200:
-        raise RuntimeError(f"publish failed [{r.status_code}]: {r.text}")
     return r.json()["id"]
 
 
