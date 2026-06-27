@@ -31,9 +31,25 @@ Examples: `cups_ace.png`, `wands_10.png`, `swords_queen.png`, `pentacles_king.pn
 > Full list of expected filenames: `python -c "import json;print('\n'.join(c['image'] for c in json.load(open('data/cards.json',encoding='utf-8'))))"`
 
 ## How to apply
-1. Copy your PNGs into `cards/` (overwriting the placeholders of the same name).
-2. No rebuild needed — `cards/` is a Docker volume.
-3. Verify a render: `python tools/compose_image.py` → check the file in `.tmp/`.
+
+### Option A — bulk import (recommended for a full deck)
+Scan all 78 cards **in deck order** (Major 0..21, then Cups, Wands, Swords, Pentacles;
+within a suit: ace, 2..10, page, knight, queen, king). Name them anything sortable
+(`01.jpg`..`78.jpg`), put them in one folder, then:
+```bash
+python tools/import_scans.py /path/to/scans --dry-run   # preview the mapping
+python tools/import_scans.py /path/to/scans             # convert + write into cards/
+```
+The script maps the i-th image to the i-th card and saves it as PNG with the right name.
+The dry-run prints `scan -> filename (Ukrainian name)` so you can verify the order.
+
+### Option B — manual
+Copy your PNGs into `cards/` named exactly per `data/cards.json` (full list:
+`docs/card_filenames.md`), overwriting the placeholders.
+
+Then (either option):
+- No rebuild needed — `cards/` is a Docker volume.
+- Verify a render: `python tools/compose_image.py` → check the file in `.tmp/`.
 
 ## Regenerate placeholders (if needed)
 ```bash
