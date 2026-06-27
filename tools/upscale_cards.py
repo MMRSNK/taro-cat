@@ -22,11 +22,13 @@ OUT = ROOT / "images-final-hq"
 MODEL = "gemini-3.1-flash-image"  # nano banana 2
 
 PROMPT = (
-    "Upscale and restore this tarot card illustration to crisp high resolution. "
-    "Keep the EXACT same artwork: same cat character, pose, composition, colors, "
-    "border, and the Ukrainian text label at the bottom must stay identical. "
-    "Do not redraw, do not add or remove elements, do not change the style. "
-    "Only sharpen, denoise and increase fine detail. Output the full card, same aspect ratio."
+    "Clean up and upscale this scanned tarot card. REMOVE the uneven black scanner margin "
+    "and the crooked/skewed black background around the card, and straighten the card so it "
+    "sits upright and fills the frame cleanly as a neat rectangle. "
+    "KEEP the card itself unchanged: its own decorative border, the cat character, pose, "
+    "composition, colors, art style AND the Ukrainian title text at the bottom must stay "
+    "exactly the same. Do not redraw the artwork, do not add or remove elements, no new text. "
+    "Output crisp high resolution, portrait aspect ratio."
 )
 
 
@@ -55,18 +57,43 @@ def enhance(client, cid):
         ],
         image_config=types.ImageConfig(image_size="2K"),
     )
-    resp = client.models.generate_content(
-        model=MODEL,
-        contents=[PROMPT, types.Part.from_bytes(data=img, mime_type="image/png")],
-        config=cfg,
-    )
+    contents = [PROMPT, types.Part.from_bytes(data=img, mime_type="image/png")]
+    resp = None
+    for attempt in range(6):
+        try:
+            resp = client.models.generate_content(model=MODEL, contents=contents, config=cfg)
+            break
+        except Exception as e:
+            msg = str(e)
+            transient = "429" in msg or "RESOURCE_EXHAUSTED" in msg or "503" in msg or "500" in msg
+            if not transient or attempt == 5:
+                raise
+            wait = 20 * (attempt + 1)  # 20,40,60,80,100s
+            print(f"[429/transient] wait {wait}s ...", end=" ", flush=True)
+            time.sleep(wait)
     for cand in (resp.candidates or []):
         for p in (cand.content.parts or []):
             if getattr(p, "inline_data", None) and p.inline_data.data:
                 OUT.mkdir(parents=True, exist_ok=True)
-                (OUT / f"{cid}.png").write_bytes(p.inline_data.data)
+                _save_trimmed(p.inline_data.data, OUT / f"{cid}.png")
                 return True
     raise RuntimeError("no image part in response")
+
+
+def _save_trimmed(png_bytes, out_path):
+    """Trim the near-white margin the model adds around the cleaned card."""
+    import io
+    import numpy as np
+    from PIL import Image
+
+    im = Image.open(io.BytesIO(png_bytes)).convert("RGB")
+    a = np.asarray(im)
+    nonwhite = ~((a[:, :, 0] > 235) & (a[:, :, 1] > 235) & (a[:, :, 2] > 235))
+    rows = np.where(nonwhite.any(axis=1))[0]
+    cols = np.where(nonwhite.any(axis=0))[0]
+    if len(rows) and len(cols):
+        im = im.crop((cols[0], rows[0], cols[-1] + 1, rows[-1] + 1))
+    im.save(out_path, "PNG")
 
 
 def main():
