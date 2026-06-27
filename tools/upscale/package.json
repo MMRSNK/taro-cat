@@ -1,0 +1,13 @@
+{
+  "name": "taro-upscale",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Upscale/enhance tarot card crops via Firebase AI Logic (Gemini image model)",
+  "scripts": {
+    "start": "node upscale.mjs"
+  },
+  "dependencies": {
+    "firebase": "^11.0.0"
+  }
+}

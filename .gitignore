@@ -12,6 +12,15 @@ data/state.json
 # Comment the next line if you want real scans tracked in the repo.
 cards/*.png
 
+# Large deck image working folders (raw scans, crops, HQ output)
+images-raw/
+images-final/
+images-final-hq/
+
+# Firebase AI (Node upscaler) — config holds the API key, never commit
+tools/upscale/node_modules/
+tools/upscale/firebase-config.json
+
 # Python
 __pycache__/
 *.pyc
