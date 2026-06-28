@@ -14,6 +14,7 @@ Run modes
   python tools/run_bot.py --post-now     # run the daily flow once, then exit
   python tools/run_bot.py --reply-once   # process pending replies once, then exit
   python tools/run_bot.py --seed-seen    # mark existing replies seen, DON'T answer (run once)
+  python tools/run_bot.py --answer-url URL  # manually reply with a reading under any post link
   python tools/run_bot.py --dry-run      # build everything but DON'T post to Threads
   python tools/run_bot.py --offline      # also skip OpenAI + host (local smoke test)
 """
@@ -50,8 +51,9 @@ def with_cta(text):
     return f"{body}\n\n{DAILY_CTA}"
 
 
-def build_forecast(question="", theme=None, offline=False):
-    """Return (cards, text, image_path)."""
+def build_forecast(question="", theme=None, offline=False, subtitle=None):
+    """Return (cards, text, image_path). `subtitle` overrides the image caption
+    (defaults to the question, or the theme when there's no question)."""
     theme = theme or settings.DAILY_THEME
     cards = draw(3)
 
@@ -61,7 +63,8 @@ def build_forecast(question="", theme=None, offline=False):
         from generate_forecast import generate
         text = generate(cards, question=question, theme=theme)
 
-    subtitle = question.strip() if question else theme
+    if subtitle is None:
+        subtitle = question.strip() if question else theme
     image_path = compose(cards, title=TITLE, subtitle=subtitle)
     return cards, text, image_path
 
@@ -182,6 +185,36 @@ def do_replies(offline=False, dry_run=False):
             log.exception("failed to handle mention %s", mid)
 
 
+def do_answer_url(url, offline=False, dry_run=False):
+    """Manual command: reply with a reading UNDER the post at `url`.
+
+    Reply-only by design — if Threads refuses to let the bot reply under another
+    user's post, the error surfaces (SystemExit) instead of falling back. The
+    post is operator-chosen, so off-topic/injection screening is skipped.
+    """
+    from answer_url import resolve
+
+    info = resolve(url)
+    pid = info["post_id"]
+    post_text = info["text"]
+    log.info("=== answer-url ===")
+    log.info("post by @%s | id=%s | text=%r",
+             info["username"], pid, post_text or "(unavailable)")
+
+    # Use the post's own text as the reading's context; generic reading if we
+    # couldn't read it.
+    question = post_text or "Загальний розклад для цього допису"
+    try:
+        cards, text, img = build_forecast(
+            question=question, theme="відповідь на допис користувача",
+            offline=offline, subtitle=f"@{info['username']}")
+        publish(text, img, reply_to_id=pid, offline=offline, dry_run=dry_run)
+    except RuntimeError as e:
+        # Threads API rejected the reply (e.g. can't reply under a 3rd-party post).
+        log.error("could not reply under %s: %s", pid, e)
+        raise SystemExit(f"answer-url failed: {e}")
+
+
 def run_scheduler():
     from apscheduler.schedulers.blocking import BlockingScheduler
     from apscheduler.triggers.cron import CronTrigger
@@ -206,12 +239,16 @@ def main():
     ap.add_argument("--reply-once", action="store_true", help="process replies once")
     ap.add_argument("--seed-seen", action="store_true",
                     help="mark existing replies seen WITHOUT answering (run once)")
+    ap.add_argument("--answer-url", metavar="URL",
+                    help="reply with a reading under the Threads post at this link")
     ap.add_argument("--dry-run", action="store_true", help="build but don't post")
     ap.add_argument("--offline", action="store_true",
                     help="skip OpenAI + Imgur + Threads (local smoke test)")
     a = ap.parse_args()
 
-    if a.post_now:
+    if a.answer_url:
+        do_answer_url(a.answer_url, offline=a.offline, dry_run=a.dry_run)
+    elif a.post_now:
         do_daily(offline=a.offline, dry_run=a.dry_run)
     elif a.seed_seen:
         seed_seen()
