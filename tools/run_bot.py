@@ -1,16 +1,21 @@
-"""Orchestrator: schedules the daily forecast post and polls for @mentions.
+"""Orchestrator: schedules the daily forecast post and polls for new replies.
+
+Reply source is set by REPLY_SOURCES (default `post_replies` = comments under the
+bot's own posts, which works for any user with no Meta verification; `mentions` =
+/me/mentions, testers only until advanced access).
 
 Flows
-  daily  : draw 3 -> forecast -> compose image -> Imgur -> publish to Threads
-  reply  : for each new mention -> draw 3 -> forecast(question) -> image ->
-           Imgur -> reply -> mark processed
+  daily  : draw 3 -> forecast -> compose image -> host -> publish to Threads
+  reply  : for each new reply -> draw 3 -> forecast(question) -> image ->
+           host -> reply -> mark processed
 
 Run modes
   python tools/run_bot.py                # long-running scheduler (default; Docker CMD)
   python tools/run_bot.py --post-now     # run the daily flow once, then exit
-  python tools/run_bot.py --reply-once   # process pending mentions once, then exit
+  python tools/run_bot.py --reply-once   # process pending replies once, then exit
+  python tools/run_bot.py --seed-seen    # mark existing replies seen, DON'T answer (run once)
   python tools/run_bot.py --dry-run      # build everything but DON'T post to Threads
-  python tools/run_bot.py --offline      # also skip OpenAI + Imgur (local smoke test)
+  python tools/run_bot.py --offline      # also skip OpenAI + host (local smoke test)
 """
 import argparse
 import logging
@@ -28,6 +33,21 @@ log = logging.getLogger("taro-bot")
 TITLE = "Таро прогноз"
 OFFLINE_STUB = ("Тестовий прогноз (offline-режим). Карти склали візерунок дня — "
                 "це лише перевірка конвеєра, без звернення до OpenAI.")
+# Appended to the DAILY post only — invites people to comment, which feeds the
+# post-replies source. Fixed wording (not model-generated) so it's exact + stable.
+DAILY_CTA = "Задай своє питання в коментарях — зроблю розклад тобі. 🐾"
+
+
+def with_cta(text):
+    """Append the daily call-to-action, clamping the body first so the CTA always
+    survives the 500-char Threads limit."""
+    from threads_post import clamp_text, THREADS_TEXT_LIMIT
+    body = clamp_text(text, THREADS_TEXT_LIMIT - len(DAILY_CTA) - 2).rstrip()
+    # clamp_text adds a trailing «…»; drop it when the body already ends on a full
+    # sentence so we don't get an ugly «...праці.…».
+    if body[-1:] == "…" and body[-2:-1] in ".!?":
+        body = body[:-1]
+    return f"{body}\n\n{DAILY_CTA}"
 
 
 def build_forecast(question="", theme=None, offline=False):
@@ -68,29 +88,69 @@ def do_daily(offline=False, dry_run=False):
     log.info("=== daily forecast ===")
     try:
         cards, text, img = build_forecast(theme=settings.DAILY_THEME, offline=offline)
+        text = with_cta(text)
         publish(text, img, offline=offline, dry_run=dry_run)
     except Exception:
         log.exception("daily forecast failed")
 
 
-def do_replies(offline=False, dry_run=False):
+def _new_mentions():
     from threads_mentions import new_mentions
+    return new_mentions()
+
+
+def _new_post_replies():
+    from threads_replies import new_replies
+    return new_replies()
+
+
+_SOURCE_FUNCS = {"mentions": _new_mentions, "post_replies": _new_post_replies}
+
+
+def collect_pending():
+    """Pending reply items from every configured source, deduped by id.
+    A failing source is logged and skipped; the others still run."""
+    items, seen = [], set()
+    names = [s.strip() for s in settings.REPLY_SOURCES.split(",") if s.strip()]
+    for name in names:
+        fetch = _SOURCE_FUNCS.get(name)
+        if not fetch:
+            log.warning("unknown REPLY_SOURCES entry %r — skipping", name)
+            continue
+        try:
+            for it in fetch():
+                iid = it.get("id")
+                if iid and iid not in seen:
+                    seen.add(iid)
+                    items.append(it)
+        except Exception:
+            log.exception("could not fetch reply source %r", name)
+    return items
+
+
+def seed_seen():
+    """Mark all currently-visible replies as seen WITHOUT answering — run once on
+    first deploy so the existing backlog doesn't get a flood of answers."""
+    from state import mark_seen
+    items = collect_pending()
+    for it in items:
+        mark_seen(it["id"])
+    log.info("seeded %d existing reply id(s) as seen (no answers sent)", len(items))
+
+
+def do_replies(offline=False, dry_run=False):
     from state import mark_seen
 
-    try:
-        mentions = new_mentions()
-    except Exception:
-        log.exception("could not fetch mentions")
-        return
+    mentions = collect_pending()
 
     if not mentions:
-        log.info("no new mentions")
+        log.info("no new replies")
         return
 
     from moderation import screen, pick_canned
     from logsink import log_block
 
-    log.info("processing %d new mention(s)", len(mentions))
+    log.info("processing %d new reply/replies", len(mentions))
     for m in mentions:
         mid = m["id"]
         raw_q = m.get("question") or ""
@@ -143,7 +203,9 @@ def run_scheduler():
 def main():
     ap = argparse.ArgumentParser(description="Threads tarot bot")
     ap.add_argument("--post-now", action="store_true", help="run daily flow once")
-    ap.add_argument("--reply-once", action="store_true", help="process mentions once")
+    ap.add_argument("--reply-once", action="store_true", help="process replies once")
+    ap.add_argument("--seed-seen", action="store_true",
+                    help="mark existing replies seen WITHOUT answering (run once)")
     ap.add_argument("--dry-run", action="store_true", help="build but don't post")
     ap.add_argument("--offline", action="store_true",
                     help="skip OpenAI + Imgur + Threads (local smoke test)")
@@ -151,6 +213,8 @@ def main():
 
     if a.post_now:
         do_daily(offline=a.offline, dry_run=a.dry_run)
+    elif a.seed_seen:
+        seed_seen()
     elif a.reply_once:
         do_replies(offline=a.offline, dry_run=a.dry_run)
     else:

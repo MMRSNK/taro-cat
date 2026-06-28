@@ -54,6 +54,11 @@ class Settings:
     # Behavior
     POST_CRON = _get("POST_CRON", "0 9 * * *")
     MENTION_POLL_MINUTES = int(_get("MENTION_POLL_MINUTES", "5"))
+    # Where reply questions come from (comma list): post_replies | mentions.
+    # post_replies = comments under the bot's own posts (works for any user,
+    # no verification). mentions = /me/mentions (testers only until App Review).
+    REPLY_SOURCES = _get("REPLY_SOURCES", "post_replies")
+    OWN_POSTS_LIMIT = int(_get("OWN_POSTS_LIMIT", "5"))  # recent posts scanned for replies
     REVERSED_PROB = float(_get("REVERSED_PROB", "0.5"))
     FORECAST_LANG = _get("FORECAST_LANG", "uk")
     TZ = _get("TZ", "Europe/Kyiv")
