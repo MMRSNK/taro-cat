@@ -14,7 +14,7 @@ Run modes
   python tools/run_bot.py --post-now     # run the daily flow once, then exit
   python tools/run_bot.py --reply-once   # process pending replies once, then exit
   python tools/run_bot.py --seed-seen    # mark existing replies seen, DON'T answer (run once)
-  python tools/run_bot.py --answer-url URL  # manually reply with a reading under any post link
+  python tools/run_bot.py --answer-url URL  # build+print a reading for a post link (no posting)
   python tools/run_bot.py --telegram-once   # process pending Telegram command messages once
   python tools/run_bot.py --dry-run      # build everything but DON'T post to Threads
   python tools/run_bot.py --offline      # also skip OpenAI + host (local smoke test)
@@ -186,49 +186,40 @@ def do_replies(offline=False, dry_run=False):
             log.exception("failed to handle mention %s", mid)
 
 
-def do_answer_url(url, offline=False, dry_run=False):
-    """Reply with a reading UNDER the post at `url`. Returns the published media
-    id (or None when skipped). Reply-only by design — if Threads refuses to let
-    the bot reply under another user's post, the underlying RuntimeError
-    propagates (callers decide how to surface it). The post is operator-chosen,
-    so off-topic/injection screening is skipped.
-    """
+def build_for_link(url, offline=False):
+    """Resolve a Threads post link and build a reading for it.
+    Returns (info, text, image_path). The post's own text is the reading's
+    context (generic reading if it couldn't be read). The post is operator-
+    chosen, so off-topic/injection screening is skipped."""
     from answer_url import resolve
 
     info = resolve(url)
-    pid = info["post_id"]
-    post_text = info["text"]
-    log.info("=== answer-url ===")
+    log.info("=== link reading ===")
     log.info("post by @%s | id=%s | text=%r",
-             info["username"], pid, post_text or "(unavailable)")
-
-    # Use the post's own text as the reading's context; generic reading if we
-    # couldn't read it.
-    question = post_text or "Загальний розклад для цього допису"
-    cards, text, img = build_forecast(
+             info["username"], info["post_id"], info["text"] or "(unavailable)")
+    question = info["text"] or "Загальний розклад для цього допису"
+    _, text, img = build_forecast(
         question=question, theme="відповідь на допис користувача",
         offline=offline, subtitle=f"@{info['username']}")
-    return publish(text, img, reply_to_id=pid, offline=offline, dry_run=dry_run)
+    return info, text, img
 
 
-def do_telegram_poll(offline=False, dry_run=False):
-    """Poll the Telegram bridge once; answer each linked post and report back to
-    the sender. A failure on one link is reported to the user and logged, never
-    crashes the poll."""
-    from telegram_listener import poll_once, send_message
+def do_telegram_poll(offline=False):
+    """Poll the Telegram bridge once; for each linked post, build a reading and
+    send the image + text back to the sender in Telegram (no Threads publish —
+    the API can't reply under a 3rd-party post). A failure on one link is
+    reported to the user and logged, never crashes the poll."""
+    from telegram_listener import poll_once, send_message, send_photo
 
     def handle(url, chat_id):
         log.info("telegram command from chat %s: %s", chat_id, url)
         send_message(chat_id, "Прийняв, роблю розклад… 🔮")
         try:
-            media_id = do_answer_url(url, offline=offline, dry_run=dry_run)
-            if dry_run or offline:
-                send_message(chat_id, "Готово (тестовий режим, без публікації). ✅")
-            else:
-                send_message(chat_id, f"Готово ✅ Відповів під постом (id {media_id}).")
+            _, text, img = build_for_link(url, offline=offline)
+            send_photo(chat_id, img, caption=text)
         except Exception as e:
-            log.exception("telegram answer failed for %s", url)
-            send_message(chat_id, f"Не вдалося відповісти під постом: {e}")
+            log.exception("telegram reading failed for %s", url)
+            send_message(chat_id, f"Не вдалося зробити розклад: {e}")
 
     try:
         poll_once(handle)
@@ -266,7 +257,7 @@ def main():
     ap.add_argument("--seed-seen", action="store_true",
                     help="mark existing replies seen WITHOUT answering (run once)")
     ap.add_argument("--answer-url", metavar="URL",
-                    help="reply with a reading under the Threads post at this link")
+                    help="build and print a reading for this Threads post link (no posting)")
     ap.add_argument("--telegram-once", action="store_true",
                     help="process pending Telegram command messages once, then exit")
     ap.add_argument("--dry-run", action="store_true", help="build but don't post")
@@ -275,12 +266,12 @@ def main():
     a = ap.parse_args()
 
     if a.answer_url:
-        try:
-            do_answer_url(a.answer_url, offline=a.offline, dry_run=a.dry_run)
-        except RuntimeError as e:
-            raise SystemExit(f"answer-url failed: {e}")
+        # Build a reading for the link and print it (no Threads publish — the API
+        # can't reply under a 3rd-party post; delivery is via Telegram).
+        _, text, img = build_for_link(a.answer_url, offline=a.offline)
+        log.info("reading built -> %s\n--- text ---\n%s", img, text)
     elif a.telegram_once:
-        do_telegram_poll(offline=a.offline, dry_run=a.dry_run)
+        do_telegram_poll(offline=a.offline)
     elif a.post_now:
         do_daily(offline=a.offline, dry_run=a.dry_run)
     elif a.seed_seen:

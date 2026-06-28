@@ -41,6 +41,24 @@ def send_message(chat_id, text):
         pass
 
 
+def send_photo(chat_id, image_path, caption=""):
+    """Send a local image with a caption back to the Telegram user. Telegram caps
+    captions at 1024 chars — overflow is sent as a follow-up text message."""
+    if not settings.TELEGRAM_BOT_TOKEN:
+        return
+    cap, rest = caption[:1024], caption[1024:]
+    try:
+        with open(image_path, "rb") as f:
+            requests.post(_api("sendPhoto"),
+                          data={"chat_id": chat_id, "caption": cap},
+                          files={"photo": f}, timeout=60)
+        if rest.strip():
+            send_message(chat_id, rest)
+    except (requests.RequestException, OSError):
+        # Fall back to text-only so the user still gets the reading.
+        send_message(chat_id, caption)
+
+
 def get_updates(offset, timeout=0):
     """Return new updates (>= offset). timeout=0 keeps it non-blocking for the
     scheduler poll."""
