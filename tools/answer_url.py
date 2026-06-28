@@ -14,12 +14,20 @@ reading's context.
 
 CLI (decode only, no API):  python tools/answer_url.py "<link>"
 """
+import html
 import re
 import sys
 
 import requests
 
 from config import settings
+
+# Threads serves OpenGraph tags (incl. the post text) to link-preview crawlers.
+# Spoofing that UA lets us read ANY public post's text with a plain GET — no
+# token, no login — which the Graph API won't do for other users' posts.
+_OG_UA = "facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)"
+_OG_RE = re.compile(
+    r'property=["\']og:description["\']\s+content=["\']([^"\']*)["\']', re.I)
 
 # Instagram/Threads shortcode alphabet (URL-safe base64, standard order).
 _ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
@@ -70,17 +78,41 @@ def fetch_post(post_id):
     return {}
 
 
+def scrape_post_text(shortcode):
+    """Read a public post's text via its OpenGraph og:description tag (no token).
+    Works for ANY public post, including other users'. Returns '' on any failure
+    or if og:description is missing. Note: very long posts may be truncated by OG.
+    """
+    try:
+        r = requests.get(
+            f"https://www.threads.com/t/{shortcode}",
+            headers={"User-Agent": _OG_UA, "Accept-Encoding": "gzip, deflate"},
+            timeout=30,
+        )
+        if r.status_code != 200:
+            return ""
+        m = _OG_RE.search(r.text)
+        return html.unescape(m.group(1)).strip() if m else ""
+    except requests.RequestException:
+        return ""
+
+
 def resolve(url):
     """Full resolve: link -> {username, shortcode, post_id, text}.
-    `text` is best-effort ('' if it couldn't be read)."""
+    `text` is best-effort ('' if it couldn't be read). Tries the Graph API first
+    (works for the bot's own posts), then falls back to scraping og:description
+    (works for any public post — token-free)."""
     username, shortcode = parse_threads_url(url)
     post_id = shortcode_to_post_id(shortcode)
     info = fetch_post(post_id)
+    text = (info.get("text") or "").strip()
+    if not text:
+        text = scrape_post_text(shortcode)
     return {
         "username": info.get("username") or username,
         "shortcode": shortcode,
         "post_id": post_id,
-        "text": (info.get("text") or "").strip(),
+        "text": text,
     }
 
 
