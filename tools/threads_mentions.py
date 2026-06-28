@@ -34,10 +34,16 @@ def fetch_mentions(limit=25):
 
 
 def strip_mention(text):
-    """Remove leading @handles so only the question remains."""
+    """Return only the text AFTER the @tag. Anything before the tag (including
+    other words and the bot handle itself) is ignored. If there is no tag, the
+    whole text is used."""
     if not text:
         return ""
-    return re.sub(r"(^|\s)@\w[\w.]*", " ", text).strip()
+    matches = list(re.finditer(r"@\w[\w.]*", text))
+    if matches:
+        text = text[matches[-1].end():]
+    # drop leading separators after the tag, keep trailing punctuation (e.g. "?")
+    return text.strip().lstrip(" \t\n\r:,.!-—–").strip()
 
 
 def new_mentions():
