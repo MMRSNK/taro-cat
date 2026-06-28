@@ -44,6 +44,7 @@ class Settings:
     # Threads
     THREADS_USER_ID = _get("THREADS_USER_ID")
     THREADS_ACCESS_TOKEN = _get("THREADS_ACCESS_TOKEN")
+    THREADS_USERNAME = _get("THREADS_USERNAME")  # bot handle, e.g. myaufar (optional)
     THREADS_API_BASE = _get("THREADS_API_BASE", "https://graph.threads.net/v1.0")
 
     # Image hosting (catbox | tmpfiles | imgur)
