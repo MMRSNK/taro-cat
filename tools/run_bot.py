@@ -87,7 +87,7 @@ def do_replies(offline=False, dry_run=False):
         log.info("no new mentions")
         return
 
-    from moderation import is_injection, pick_canned
+    from moderation import screen, pick_canned
     from logsink import log_block
 
     log.info("processing %d new mention(s)", len(mentions))
@@ -96,12 +96,13 @@ def do_replies(offline=False, dry_run=False):
         raw_q = m.get("question") or ""
         log.info("mention %s from @%s: %s", mid, m.get("username"), raw_q)
 
-        # Suspicious / prompt-injection attempt -> canned reply, no tarot reading.
-        if is_injection(raw_q):
+        # Suspicious / off-topic / injection -> canned reply, no tarot reading.
+        reason = screen(raw_q)
+        if reason:
             ctext, cimg = pick_canned()
-            log.info("injection detected in %s -> canned reply", mid)
-            log_block("INJECTION_REPLY", mention=mid, user=m.get("username"),
-                      question=raw_q, reply=ctext, image=str(cimg))
+            log.info("rejected mention %s (%s) -> canned reply", mid, reason)
+            log_block("REJECTED_REPLY", mention=mid, user=m.get("username"),
+                      reason=reason, question=raw_q, reply=ctext, image=str(cimg))
             try:
                 publish(ctext, cimg, reply_to_id=mid, offline=offline, dry_run=dry_run)
                 if not (offline or dry_run):
