@@ -51,6 +51,13 @@ class Settings:
     IMAGE_HOST = _get("IMAGE_HOST", "catbox")
     IMGUR_CLIENT_ID = _get("IMGUR_CLIENT_ID")  # only if IMAGE_HOST=imgur
 
+    # Telegram command bridge (optional). When TELEGRAM_BOT_TOKEN is set, the
+    # scheduler polls the bot for DMs containing a Threads link and answers under
+    # that post. Only messages from TELEGRAM_ALLOWED_USER_ID are honored.
+    TELEGRAM_BOT_TOKEN = _get("TELEGRAM_BOT_TOKEN")
+    TELEGRAM_ALLOWED_USER_ID = _get("TELEGRAM_ALLOWED_USER_ID")  # numeric id, e.g. 487054429
+    TELEGRAM_POLL_SECONDS = int(_get("TELEGRAM_POLL_SECONDS", "30"))
+
     # Behavior
     POST_CRON = _get("POST_CRON", "0 9 * * *")
     MENTION_POLL_MINUTES = int(_get("MENTION_POLL_MINUTES", "5"))

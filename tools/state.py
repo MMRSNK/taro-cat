@@ -23,6 +23,18 @@ def _save(state):
                           encoding="utf-8")
 
 
+def get_value(key, default=None):
+    """Read an arbitrary persisted value (e.g. the Telegram update offset)."""
+    return _load().get(key, default)
+
+
+def set_value(key, value):
+    """Persist an arbitrary value under `key`."""
+    state = _load()
+    state[key] = value
+    _save(state)
+
+
 def is_seen(mention_id):
     return mention_id in _load().get("seen_mentions", [])
 

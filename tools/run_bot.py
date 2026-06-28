@@ -15,6 +15,7 @@ Run modes
   python tools/run_bot.py --reply-once   # process pending replies once, then exit
   python tools/run_bot.py --seed-seen    # mark existing replies seen, DON'T answer (run once)
   python tools/run_bot.py --answer-url URL  # manually reply with a reading under any post link
+  python tools/run_bot.py --telegram-once   # process pending Telegram command messages once
   python tools/run_bot.py --dry-run      # build everything but DON'T post to Threads
   python tools/run_bot.py --offline      # also skip OpenAI + host (local smoke test)
 """
@@ -186,11 +187,11 @@ def do_replies(offline=False, dry_run=False):
 
 
 def do_answer_url(url, offline=False, dry_run=False):
-    """Manual command: reply with a reading UNDER the post at `url`.
-
-    Reply-only by design — if Threads refuses to let the bot reply under another
-    user's post, the error surfaces (SystemExit) instead of falling back. The
-    post is operator-chosen, so off-topic/injection screening is skipped.
+    """Reply with a reading UNDER the post at `url`. Returns the published media
+    id (or None when skipped). Reply-only by design — if Threads refuses to let
+    the bot reply under another user's post, the underlying RuntimeError
+    propagates (callers decide how to surface it). The post is operator-chosen,
+    so off-topic/injection screening is skipped.
     """
     from answer_url import resolve
 
@@ -204,15 +205,35 @@ def do_answer_url(url, offline=False, dry_run=False):
     # Use the post's own text as the reading's context; generic reading if we
     # couldn't read it.
     question = post_text or "Загальний розклад для цього допису"
+    cards, text, img = build_forecast(
+        question=question, theme="відповідь на допис користувача",
+        offline=offline, subtitle=f"@{info['username']}")
+    return publish(text, img, reply_to_id=pid, offline=offline, dry_run=dry_run)
+
+
+def do_telegram_poll(offline=False, dry_run=False):
+    """Poll the Telegram bridge once; answer each linked post and report back to
+    the sender. A failure on one link is reported to the user and logged, never
+    crashes the poll."""
+    from telegram_listener import poll_once, send_message
+
+    def handle(url, chat_id):
+        log.info("telegram command from chat %s: %s", chat_id, url)
+        send_message(chat_id, "Прийняв, роблю розклад… 🔮")
+        try:
+            media_id = do_answer_url(url, offline=offline, dry_run=dry_run)
+            if dry_run or offline:
+                send_message(chat_id, "Готово (тестовий режим, без публікації). ✅")
+            else:
+                send_message(chat_id, f"Готово ✅ Відповів під постом (id {media_id}).")
+        except Exception as e:
+            log.exception("telegram answer failed for %s", url)
+            send_message(chat_id, f"Не вдалося відповісти під постом: {e}")
+
     try:
-        cards, text, img = build_forecast(
-            question=question, theme="відповідь на допис користувача",
-            offline=offline, subtitle=f"@{info['username']}")
-        publish(text, img, reply_to_id=pid, offline=offline, dry_run=dry_run)
-    except RuntimeError as e:
-        # Threads API rejected the reply (e.g. can't reply under a 3rd-party post).
-        log.error("could not reply under %s: %s", pid, e)
-        raise SystemExit(f"answer-url failed: {e}")
+        poll_once(handle)
+    except Exception:
+        log.exception("telegram poll failed")
 
 
 def run_scheduler():
@@ -225,6 +246,11 @@ def run_scheduler():
                   id="daily_post")
     sched.add_job(do_replies, "interval",
                   minutes=settings.MENTION_POLL_MINUTES, id="poll_mentions")
+    if settings.TELEGRAM_BOT_TOKEN:
+        sched.add_job(do_telegram_poll, "interval",
+                      seconds=settings.TELEGRAM_POLL_SECONDS, id="poll_telegram")
+        log.info("telegram bridge ON | poll every %ds | allowed user=%s",
+                 settings.TELEGRAM_POLL_SECONDS, settings.TELEGRAM_ALLOWED_USER_ID)
     log.info("scheduler up | daily cron=%r tz=%s | mention poll every %d min",
              settings.POST_CRON, settings.TZ, settings.MENTION_POLL_MINUTES)
     try:
@@ -241,13 +267,20 @@ def main():
                     help="mark existing replies seen WITHOUT answering (run once)")
     ap.add_argument("--answer-url", metavar="URL",
                     help="reply with a reading under the Threads post at this link")
+    ap.add_argument("--telegram-once", action="store_true",
+                    help="process pending Telegram command messages once, then exit")
     ap.add_argument("--dry-run", action="store_true", help="build but don't post")
     ap.add_argument("--offline", action="store_true",
                     help="skip OpenAI + Imgur + Threads (local smoke test)")
     a = ap.parse_args()
 
     if a.answer_url:
-        do_answer_url(a.answer_url, offline=a.offline, dry_run=a.dry_run)
+        try:
+            do_answer_url(a.answer_url, offline=a.offline, dry_run=a.dry_run)
+        except RuntimeError as e:
+            raise SystemExit(f"answer-url failed: {e}")
+    elif a.telegram_once:
+        do_telegram_poll(offline=a.offline, dry_run=a.dry_run)
     elif a.post_now:
         do_daily(offline=a.offline, dry_run=a.dry_run)
     elif a.seed_seen:
