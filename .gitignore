@@ -9,9 +9,8 @@ credentials.json
 data/state.json
 data/prompts.log
 
-# Card scans are user-supplied; keep placeholders out of git by default.
-# Comment the next line if you want real scans tracked in the repo.
-cards/*.png
+# cards/ ARE tracked (downscaled deck, ~600px) so deploy is a plain git pull.
+# 2K archive stays in images-final-hq/ (ignored below).
 
 # Large deck image working folders (raw scans, crops, HQ output)
 images-raw/
