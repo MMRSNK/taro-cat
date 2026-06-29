@@ -176,9 +176,11 @@ def do_replies(offline=False, dry_run=False):
             continue
 
         question = raw_q or "Загальний розклад на сьогодні"
+        asker = m.get("username")
         try:
             cards, text, img = build_forecast(
-                question=question, theme="питання користувача", offline=offline)
+                question=question, theme="питання користувача", offline=offline,
+                subtitle=f"@{asker}" if asker else None)
             publish(text, img, reply_to_id=mid, offline=offline, dry_run=dry_run)
             if not (offline or dry_run):
                 mark_seen(mid)
@@ -204,6 +206,19 @@ def build_for_link(url, offline=False):
     return info, text, img
 
 
+def build_for_question(username, question, offline=False):
+    """Build a reading for a `@nickname - question` Telegram command.
+    Image caption shows only @nickname (like the link flow); the question text
+    drives the forecast. Operator-trusted, so screening is skipped.
+    Returns (text, image_path)."""
+    handle = (username or "").lstrip("@")
+    log.info("=== question reading === @%s | q=%r", handle, question)
+    _, text, img = build_forecast(
+        question=question, theme="питання користувача",
+        offline=offline, subtitle=f"@{handle}")
+    return text, img
+
+
 def do_telegram_poll(offline=False):
     """Poll the Telegram bridge once; for each linked post, build a reading and
     send the image + text back to the sender in Telegram (no Threads publish —
@@ -211,14 +226,18 @@ def do_telegram_poll(offline=False):
     reported to the user and logged, never crashes the poll."""
     from telegram_listener import poll_once, send_message, send_photo
 
-    def handle(url, chat_id):
-        log.info("telegram command from chat %s: %s", chat_id, url)
+    def handle(cmd, chat_id):
+        log.info("telegram command from chat %s: %s", chat_id, cmd)
         send_message(chat_id, "Прийняв, роблю розклад… 🔮")
         try:
-            _, text, img = build_for_link(url, offline=offline)
+            if cmd["kind"] == "link":
+                _, text, img = build_for_link(cmd["url"], offline=offline)
+            else:  # "question": @nickname - question
+                text, img = build_for_question(
+                    cmd["username"], cmd["question"], offline=offline)
             send_photo(chat_id, img, caption=text)
         except Exception as e:
-            log.exception("telegram reading failed for %s", url)
+            log.exception("telegram reading failed for %s", cmd)
             send_message(chat_id, f"Не вдалося зробити розклад: {e}")
 
     try:
