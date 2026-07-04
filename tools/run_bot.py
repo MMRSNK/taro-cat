@@ -15,12 +15,13 @@ Run modes
   python tools/run_bot.py --reply-once   # process pending replies once, then exit
   python tools/run_bot.py --seed-seen    # mark existing replies seen, DON'T answer (run once)
   python tools/run_bot.py --answer-url URL  # build+print a reading for a post link (no posting)
-  python tools/run_bot.py --telegram-once   # process pending Telegram command messages once
+  python tools/run_bot.py --telegram-once   # process pending Telegram messages/buttons once
   python tools/run_bot.py --dry-run      # build everything but DON'T post to Threads
   python tools/run_bot.py --offline      # also skip OpenAI + host (local smoke test)
 """
 import argparse
 import logging
+from uuid import uuid4
 
 from config import settings
 from compose_image import compose
@@ -219,6 +220,89 @@ def build_for_question(username, question, offline=False):
     return text, img
 
 
+# In-memory store of /post drafts awaiting a button press, keyed by a short id.
+# Lives only in the running scheduler process — a restart drops pending drafts,
+# and the callback handler tells the user to re-run /post (the image also lives in
+# .tmp, so persisting across restarts would be brittle). YAGNI: no disk store.
+_DRAFTS = {}
+
+
+def _draft_keyboard(did):
+    """Inline keyboard offered under a /post draft."""
+    return {"inline_keyboard": [[
+        {"text": "✅ Запостити", "callback_data": f"post:{did}"},
+        {"text": "♻️ Перепрогноз", "callback_data": f"redo:{did}"},
+        {"text": "❌ Відмінити", "callback_data": f"cancel:{did}"},
+    ]]}
+
+
+def build_post_draft(question, offline=False):
+    """Build a general Threads post (post body + daily CTA) for a /post question.
+    Image caption is the bot's own @handle. Returns a draft dict."""
+    handle = (settings.THREADS_USERNAME or "myaufar").lstrip("@")
+    log.info("=== /post draft === q=%r", question)
+    _, text, img = build_forecast(
+        question=question, theme="питання користувача",
+        offline=offline, subtitle=f"@{handle}")
+    return {"question": question, "text": with_cta(text), "img": img}
+
+
+def _send_draft(chat_id, draft):
+    """Store a draft under a fresh id and send it with the action buttons."""
+    from telegram_listener import send_photo
+    did = uuid4().hex[:8]
+    _DRAFTS[did] = draft
+    send_photo(chat_id, draft["img"], caption=draft["text"],
+               reply_markup=_draft_keyboard(did))
+
+
+def handle_post_callback(cmd, chat_id, offline=False):
+    """React to a /post inline button (Publish / Re-forecast / Cancel)."""
+    from telegram_listener import (answer_callback, edit_caption,
+                                   edit_reply_markup, send_message)
+    cbq = cmd["callback_query_id"]
+    mid = cmd["message_id"]
+    action, _, did = (cmd.get("data") or "").partition(":")
+    draft = _DRAFTS.get(did)
+
+    if not draft:
+        answer_callback(cbq, "Чернетка застаріла — зроби /post ще раз")
+        edit_reply_markup(chat_id, mid)  # strip stale buttons
+        return
+
+    if action == "cancel":
+        _DRAFTS.pop(did, None)
+        answer_callback(cbq, "Відмінено")
+        edit_caption(chat_id, mid, "❌ Відмінено", reply_markup={"inline_keyboard": []})
+
+    elif action == "post":
+        answer_callback(cbq, "Публікую в Threads…")
+        try:
+            media_id = publish(draft["text"], draft["img"],
+                               reply_to_id=None, offline=offline)
+            _DRAFTS.pop(did, None)
+            edit_caption(chat_id, mid,
+                         f"✅ Опубліковано в Threads (media id {media_id})",
+                         reply_markup={"inline_keyboard": []})
+        except Exception as e:
+            log.exception("telegram /post publish failed")
+            # Keep the draft + buttons so the user can retry.
+            send_message(chat_id, f"Не вдалося опублікувати: {e}")
+
+    elif action == "redo":
+        answer_callback(cbq, "Роблю новий прогноз…")
+        edit_reply_markup(chat_id, mid)  # strip old buttons; a new message follows
+        _DRAFTS.pop(did, None)
+        try:
+            _send_draft(chat_id, build_post_draft(draft["question"], offline=offline))
+        except Exception as e:
+            log.exception("telegram /post re-forecast failed")
+            send_message(chat_id, f"Не вдалося перепрогнозувати: {e}")
+
+    else:
+        answer_callback(cbq, "")  # unknown action — just dismiss the spinner
+
+
 def do_telegram_poll(offline=False):
     """Poll the Telegram bridge once; for each linked post, build a reading and
     send the image + text back to the sender in Telegram (no Threads publish —
@@ -228,9 +312,24 @@ def do_telegram_poll(offline=False):
 
     def handle(cmd, chat_id):
         log.info("telegram command from chat %s: %s", chat_id, cmd)
+        kind = cmd["kind"]
+
+        if kind == "callback":
+            handle_post_callback(cmd, chat_id, offline=offline)
+            return
+
+        if kind == "post":
+            send_message(chat_id, "Готую пост, дай хвилинку… 🔮")
+            try:
+                _send_draft(chat_id, build_post_draft(cmd["question"], offline=offline))
+            except Exception as e:
+                log.exception("telegram /post build failed for %s", cmd)
+                send_message(chat_id, f"Не вдалося зробити прогноз: {e}")
+            return
+
         send_message(chat_id, "Прийняв, роблю розклад… 🔮")
         try:
-            if cmd["kind"] == "link":
+            if kind == "link":
                 _, text, img = build_for_link(cmd["url"], offline=offline)
             else:  # "question": @nickname - question
                 text, img = build_for_question(
