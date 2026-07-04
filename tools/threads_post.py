@@ -36,15 +36,24 @@ def _base():
     return f"{settings.THREADS_API_BASE}/{settings.THREADS_USER_ID}"
 
 
+# Subcodes worth retrying even though Meta marks them is_transient:false.
+#   2207003 — media download timeout ("Медіафайл завантажується занадто довго"):
+#             Threads' server-side fetch of the hosted image URL (catbox) timed
+#             out. A re-fetch usually succeeds, so retry rather than give up.
+_RETRIABLE_SUBCODES = {2207003}
+
+
 def _is_transient(resp):
-    """Threads sometimes returns transient 500s — flagged is_transient / code 2."""
+    """Whether the response is worth retrying. Covers Threads' transient 500s
+    (is_transient / code 2) plus known-flaky media-download timeouts."""
     if resp.status_code >= 500:
         return True
     try:
         err = resp.json().get("error", {})
-        return bool(err.get("is_transient")) or err.get("code") == 2
     except ValueError:
         return False
+    return (bool(err.get("is_transient")) or err.get("code") == 2
+            or err.get("error_subcode") in _RETRIABLE_SUBCODES)
 
 
 def _post_retry(url, data, what, attempts=4, base_delay=4):
