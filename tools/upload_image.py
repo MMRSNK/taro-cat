@@ -69,12 +69,24 @@ _PROVIDERS = {
 }
 
 
-def upload(image_path):
-    host = (settings.IMAGE_HOST or "catbox").lower()
+def upload(image_path, host=None):
+    """Upload to `host` (defaults to IMAGE_HOST). Returns the public direct URL."""
+    host = (host or settings.IMAGE_HOST or "catbox").lower()
     fn = _PROVIDERS.get(host)
     if not fn:
-        raise SystemExit(f"unknown IMAGE_HOST={host!r}; pick one of {list(_PROVIDERS)}")
+        raise SystemExit(f"unknown image host {host!r}; pick one of {list(_PROVIDERS)}")
     return fn(image_path)
+
+
+def host_order():
+    """Hosts to try, primary (IMAGE_HOST) first, the rest as fallbacks. Used when
+    Threads can't fetch the image from one host (subcode 2207003) so the post can
+    be retried from another. imgur is skipped unless IMGUR_CLIENT_ID is set."""
+    primary = (settings.IMAGE_HOST or "catbox").lower()
+    order = [primary] + [h for h in ("tmpfiles", "catbox", "imgur") if h != primary]
+    if not settings.IMGUR_CLIENT_ID:
+        order = [h for h in order if h != "imgur"]
+    return order
 
 
 if __name__ == "__main__":

@@ -78,15 +78,36 @@ def publish(text, image_path, reply_to_id=None, offline=False, dry_run=False):
                  image_path, reply_to_id, text)
         return None
 
-    from upload_image import upload
-    from threads_post import post
+    from threads_post import post, MediaTimeoutError
 
-    image_url = upload(image_path) if image_path else None
-    if image_url:
-        log.info("uploaded image -> %s", image_url)
-    media_id = post(text, image_url=image_url, reply_to_id=reply_to_id)
-    log.info("published to Threads -> media id %s", media_id)
-    return media_id
+    if not image_path:
+        media_id = post(text, image_url=None, reply_to_id=reply_to_id)
+        log.info("published to Threads -> media id %s", media_id)
+        return media_id
+
+    # Upload + post, falling back to another image host if Threads can't fetch the
+    # image from the current one (subcode 2207003, e.g. catbox blocked for Meta).
+    from upload_image import upload, host_order
+
+    last_err = None
+    for host in host_order():
+        try:
+            image_url = upload(image_path, host=host)
+        except Exception as e:
+            log.warning("image upload via %s failed: %s", host, e)
+            last_err = e
+            continue
+        log.info("uploaded image via %s -> %s", host, image_url)
+        try:
+            media_id = post(text, image_url=image_url, reply_to_id=reply_to_id)
+        except MediaTimeoutError as e:
+            log.warning("Threads couldn't fetch image from %s (2207003) — "
+                        "trying next host", host)
+            last_err = e
+            continue
+        log.info("published to Threads -> media id %s", media_id)
+        return media_id
+    raise last_err or RuntimeError("no image host succeeded")
 
 
 def do_daily(offline=False, dry_run=False):

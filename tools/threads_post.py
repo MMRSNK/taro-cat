@@ -36,24 +36,34 @@ def _base():
     return f"{settings.THREADS_API_BASE}/{settings.THREADS_USER_ID}"
 
 
-# Subcodes worth retrying even though Meta marks them is_transient:false.
-#   2207003 — media download timeout ("Медіафайл завантажується занадто довго"):
-#             Threads' server-side fetch of the hosted image URL (catbox) timed
-#             out. A re-fetch usually succeeds, so retry rather than give up.
-_RETRIABLE_SUBCODES = {2207003}
+# Threads' server-side fetch of the hosted image URL timed out
+# ("Медіафайл завантажується занадто довго"). Marked is_transient:false and NOT
+# worth retrying against the same host (the host is unreachable for Meta's
+# fetcher) — the caller re-uploads to a different host instead.
+_MEDIA_TIMEOUT_SUBCODE = 2207003
+
+
+class MediaTimeoutError(RuntimeError):
+    """Threads couldn't download the image from the given host (subcode 2207003).
+    The caller should retry the post with a different image host."""
 
 
 def _is_transient(resp):
-    """Whether the response is worth retrying. Covers Threads' transient 500s
-    (is_transient / code 2) plus known-flaky media-download timeouts."""
+    """Threads sometimes returns transient 500s — flagged is_transient / code 2."""
     if resp.status_code >= 500:
         return True
     try:
         err = resp.json().get("error", {})
+        return bool(err.get("is_transient")) or err.get("code") == 2
     except ValueError:
         return False
-    return (bool(err.get("is_transient")) or err.get("code") == 2
-            or err.get("error_subcode") in _RETRIABLE_SUBCODES)
+
+
+def _subcode(resp):
+    try:
+        return resp.json().get("error", {}).get("error_subcode")
+    except ValueError:
+        return None
 
 
 def _post_retry(url, data, what, attempts=4, base_delay=4):
@@ -67,7 +77,10 @@ def _post_retry(url, data, what, attempts=4, base_delay=4):
         if not _is_transient(r) or i == attempts - 1:
             break
         time.sleep(base_delay * (i + 1))  # 4s, 8s, 12s
-    raise RuntimeError(f"{what} failed [{last.status_code}]: {last.text}")
+    msg = f"{what} failed [{last.status_code}]: {last.text}"
+    if _subcode(last) == _MEDIA_TIMEOUT_SUBCODE:
+        raise MediaTimeoutError(msg)  # host unreachable for Meta -> try another
+    raise RuntimeError(msg)
 
 
 def create_container(text, image_url=None, reply_to_id=None):
