@@ -78,15 +78,16 @@ def publish(text, image_path, reply_to_id=None, offline=False, dry_run=False):
                  image_path, reply_to_id, text)
         return None
 
-    from threads_post import post, MediaTimeoutError
+    from threads_post import post, MediaFetchError
 
     if not image_path:
         media_id = post(text, image_url=None, reply_to_id=reply_to_id)
         log.info("published to Threads -> media id %s", media_id)
         return media_id
 
-    # Upload + post, falling back to another image host if Threads can't fetch the
-    # image from the current one (subcode 2207003, e.g. catbox blocked for Meta).
+    # Upload + post, falling back to another image host if Threads can't fetch a
+    # valid image from the current one (subcodes 2207003 timeout / 2207083 bad
+    # format, e.g. the host serves an HTML page to Meta's fetcher).
     from upload_image import upload, host_order
 
     last_err = None
@@ -100,9 +101,9 @@ def publish(text, image_path, reply_to_id=None, offline=False, dry_run=False):
         log.info("uploaded image via %s -> %s", host, image_url)
         try:
             media_id = post(text, image_url=image_url, reply_to_id=reply_to_id)
-        except MediaTimeoutError as e:
-            log.warning("Threads couldn't fetch image from %s (2207003) — "
-                        "trying next host", host)
+        except MediaFetchError as e:
+            log.warning("Threads couldn't fetch a valid image from %s — "
+                        "trying next host (%s)", host, e)
             last_err = e
             continue
         log.info("published to Threads -> media id %s", media_id)

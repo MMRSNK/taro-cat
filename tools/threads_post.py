@@ -36,16 +36,26 @@ def _base():
     return f"{settings.THREADS_API_BASE}/{settings.THREADS_USER_ID}"
 
 
-# Threads' server-side fetch of the hosted image URL timed out
-# ("Медіафайл завантажується занадто довго"). Marked is_transient:false and NOT
-# worth retrying against the same host (the host is unreachable for Meta's
-# fetcher) — the caller re-uploads to a different host instead.
-_MEDIA_TIMEOUT_SUBCODE = 2207003
+# Subcodes where Threads' server-side fetch of the hosted image URL failed in a
+# way that's specific to the host, not the image — retrying against the SAME host
+# won't help, but re-uploading to a DIFFERENT host does. Marked is_transient:false.
+#   2207003 — download timed out ("Медіафайл завантажується занадто довго"): the
+#             host is unreachable/too slow for Meta's fetcher.
+#   2207083 — "image format is not supported": Meta fetched the URL but got a
+#             non-image (e.g. an HTML interstitial/error page from the host)
+#             instead of the raw bytes, so it can't decode a valid image.
+# The image itself is fine (we composed + uploaded it), so the caller re-uploads
+# to a different host instead.
+_MEDIA_HOST_FETCH_SUBCODES = {2207003, 2207083}
 
 
-class MediaTimeoutError(RuntimeError):
-    """Threads couldn't download the image from the given host (subcode 2207003).
-    The caller should retry the post with a different image host."""
+class MediaFetchError(RuntimeError):
+    """Threads couldn't fetch a valid image from the given host (see
+    _MEDIA_HOST_FETCH_SUBCODES). The caller should retry with a different host."""
+
+
+# Backwards-compatible alias (older name referenced only the timeout subcode).
+MediaTimeoutError = MediaFetchError
 
 
 def _is_transient(resp):
@@ -78,8 +88,8 @@ def _post_retry(url, data, what, attempts=4, base_delay=4):
             break
         time.sleep(base_delay * (i + 1))  # 4s, 8s, 12s
     msg = f"{what} failed [{last.status_code}]: {last.text}"
-    if _subcode(last) == _MEDIA_TIMEOUT_SUBCODE:
-        raise MediaTimeoutError(msg)  # host unreachable for Meta -> try another
+    if _subcode(last) in _MEDIA_HOST_FETCH_SUBCODES:
+        raise MediaFetchError(msg)  # host unusable for Meta -> try another host
     raise RuntimeError(msg)
 
 
