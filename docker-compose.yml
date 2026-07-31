@@ -6,6 +6,9 @@ services:
     env_file: .env
     environment:
       - TZ=${TZ:-Europe/Kyiv}
+    ports:
+      # Static image server (Cloudflare Tunnel -> img.s3nko.com -> here).
+      - "127.0.0.1:8091:8091"
     volumes:
       # Drop real card scans here without rebuilding the image.
       - ./cards:/app/cards
@@ -13,3 +16,11 @@ services:
       - ./data:/app/data
       # Scratch space for composed images.
       - ./.tmp:/app/.tmp
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: taro-cloudflared
+    restart: unless-stopped
+    network_mode: host          # bridged can't reach the CF edge :7844 on senko
+    command: tunnel --no-autoupdate run --token ${CLOUDFLARE_TUNNEL_TOKEN}
+    profiles: ["tunnel"]        # `docker compose --profile tunnel up -d` on senko
