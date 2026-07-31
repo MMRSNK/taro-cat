@@ -76,8 +76,21 @@ def _subcode(resp):
         return None
 
 
-def _post_retry(url, data, what, attempts=4, base_delay=4):
-    """POST with retry/backoff on transient Threads errors."""
+def _code(resp):
+    try:
+        return resp.json().get("error", {}).get("code")
+    except ValueError:
+        return None
+
+
+def _post_retry(url, data, what, attempts=4, base_delay=4, image_fallback=False):
+    """POST with retry/backoff on transient Threads errors.
+
+    image_fallback: set when the request carries a hosted image_url. On a final
+    non-specific failure (HTTP 500 / generic code 1 "unknown error") Meta usually
+    couldn't fetch or decode the image from this host — sometimes it reports the
+    precise 2207083, sometimes just a generic 500 — so we raise MediaFetchError to
+    let the caller rotate to another host instead of dying."""
     last = None
     for i in range(attempts):
         r = requests.post(url, data=data, timeout=60)
@@ -90,6 +103,8 @@ def _post_retry(url, data, what, attempts=4, base_delay=4):
     msg = f"{what} failed [{last.status_code}]: {last.text}"
     if _subcode(last) in _MEDIA_HOST_FETCH_SUBCODES:
         raise MediaFetchError(msg)  # host unusable for Meta -> try another host
+    if image_fallback and (last.status_code >= 500 or _code(last) == 1):
+        raise MediaFetchError(msg)  # generic fetch failure -> try another host
     raise RuntimeError(msg)
 
 
@@ -107,7 +122,8 @@ def create_container(text, image_url=None, reply_to_id=None):
     if reply_to_id:
         params["reply_to_id"] = reply_to_id
 
-    r = _post_retry(f"{_base()}/threads", params, "create container")
+    r = _post_retry(f"{_base()}/threads", params, "create container",
+                    image_fallback=bool(image_url))
     return r.json()["id"]
 
 
