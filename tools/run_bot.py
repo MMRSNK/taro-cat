@@ -23,6 +23,7 @@ import argparse
 import logging
 from uuid import uuid4
 
+import config
 from config import settings
 from compose_image import compose
 from draw_cards import draw
@@ -78,37 +79,33 @@ def publish(text, image_path, reply_to_id=None, offline=False, dry_run=False):
                  image_path, reply_to_id, text)
         return None
 
-    from threads_post import post, MediaFetchError
+    from threads_post import post
 
     if not image_path:
         media_id = post(text, image_url=None, reply_to_id=reply_to_id)
         log.info("published to Threads -> media id %s", media_id)
         return media_id
 
-    # Upload + post, falling back to another image host if Threads can't fetch a
-    # valid image from the current one (subcodes 2207003 timeout / 2207083 bad
-    # format, e.g. the host serves an HTML page to Meta's fetcher).
-    from upload_image import upload, host_order
+    # Self-host the image and post. No fallback: on failure the caller alerts
+    # the operator over Telegram (see do_daily / handle_post_callback).
+    from upload_image import upload
 
-    last_err = None
-    for host in host_order():
-        try:
-            image_url = upload(image_path, host=host)
-        except Exception as e:
-            log.warning("image upload via %s failed: %s", host, e)
-            last_err = e
-            continue
-        log.info("uploaded image via %s -> %s", host, image_url)
-        try:
-            media_id = post(text, image_url=image_url, reply_to_id=reply_to_id)
-        except MediaFetchError as e:
-            log.warning("Threads couldn't fetch a valid image from %s — "
-                        "trying next host (%s)", host, e)
-            last_err = e
-            continue
-        log.info("published to Threads -> media id %s", media_id)
-        return media_id
-    raise last_err or RuntimeError("no image host succeeded")
+    image_url = upload(image_path)
+    log.info("image at %s", image_url)
+    media_id = post(text, image_url=image_url, reply_to_id=reply_to_id)
+    log.info("published to Threads -> media id %s", media_id)
+    return media_id
+
+
+def notify_operator(text):
+    """DM the operator over Telegram (best-effort; no-op if the bridge is off)."""
+    if not (settings.TELEGRAM_BOT_TOKEN and settings.TELEGRAM_ALLOWED_USER_ID):
+        return
+    try:
+        from telegram_listener import send_message
+        send_message(settings.TELEGRAM_ALLOWED_USER_ID, text)
+    except Exception:
+        log.exception("operator notify failed")
 
 
 def do_daily(offline=False, dry_run=False):
@@ -117,8 +114,9 @@ def do_daily(offline=False, dry_run=False):
         cards, text, img = build_forecast(theme=settings.DAILY_THEME, offline=offline)
         text = with_cta(text)
         publish(text, img, offline=offline, dry_run=dry_run)
-    except Exception:
+    except Exception as e:
         log.exception("daily forecast failed")
+        notify_operator(f"⚠️ Збій завантаження посту (денний):\n{e}")
 
 
 def _new_mentions():
@@ -309,7 +307,7 @@ def handle_post_callback(cmd, chat_id, offline=False):
         except Exception as e:
             log.exception("telegram /post publish failed")
             # Keep the draft + buttons so the user can retry.
-            send_message(chat_id, f"Не вдалося опублікувати: {e}")
+            send_message(chat_id, f"⚠️ Збій завантаження посту:\n{e}")
 
     elif action == "redo":
         answer_callback(cbq, "Роблю новий прогноз…")
@@ -404,6 +402,12 @@ def main():
     ap.add_argument("--offline", action="store_true",
                     help="skip OpenAI + Imgur + Threads (local smoke test)")
     a = ap.parse_args()
+
+    if settings.PUBLIC_IMAGE_BASE and not a.offline:
+        import image_server
+        image_server.start_background()
+        log.info("image server on :%d serving %s",
+                 settings.IMAGE_SERVER_PORT, config.PUBLIC_DIR)
 
     if a.answer_url:
         # Build a reading for the link and print it (no Threads publish — the API
