@@ -24,6 +24,7 @@ PROMPTS_DIR = ROOT / "prompts"
 CARDS_JSON = DATA_DIR / "cards.json"
 STATE_JSON = DATA_DIR / "state.json"
 PROMPT_FILE = PROMPTS_DIR / "forecast_prompt.yaml"
+PUBLIC_DIR = TMP_DIR / "public"  # self-hosted images served over HTTP
 
 # Load .env (no-op in Docker where vars come from env_file, but handy locally).
 load_dotenv(ROOT / ".env")
@@ -47,9 +48,10 @@ class Settings:
     THREADS_USERNAME = _get("THREADS_USERNAME")  # bot handle, e.g. myaufar (optional)
     THREADS_API_BASE = _get("THREADS_API_BASE", "https://graph.threads.net/v1.0")
 
-    # Image hosting (catbox | tmpfiles | imgur)
-    IMAGE_HOST = _get("IMAGE_HOST", "catbox")
-    IMGUR_CLIENT_ID = _get("IMGUR_CLIENT_ID")  # only if IMAGE_HOST=imgur
+    # Self-hosted image serving. The composed PNG is written to PUBLIC_DIR and
+    # served by tools/image_server.py, exposed publicly via a Cloudflare Tunnel.
+    PUBLIC_IMAGE_BASE = _get("PUBLIC_IMAGE_BASE")       # e.g. https://img.s3nko.com
+    IMAGE_SERVER_PORT = int(_get("IMAGE_SERVER_PORT", "8091"))
 
     # Telegram command bridge (optional). When TELEGRAM_BOT_TOKEN is set, the
     # scheduler polls the bot for DMs containing a Threads link and answers under
